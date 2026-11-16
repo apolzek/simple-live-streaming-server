@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estúdio · StreamLab</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main>
+  <h1>Estúdio</h1>
+  <p class="muted">Crie um canal, pegue sua <b>stream key</b> e transmita pelo OBS, pelo ffmpeg ou direto do navegador (WebRTC/WHIP).</p>
+
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(360px, 1fr))">
+    <section class="card">
+      <h2 style="margin-top:0">1. Criar canal</h2>
+      <form id="create">
+        <label for="name">Nome do canal (vira a URL /watch/&lt;nome&gt;)</label>
+        <input id="name" required pattern="[a-z0-9_]{3,25}" placeholder="ex: apolzek" autocomplete="off">
+        <label for="ctitle">Título da live</label>
+        <input id="ctitle" placeholder="Aprendendo streaming do zero" maxlength="120">
+        <p><button class="btn primary">Criar canal e gerar stream key</button></p>
+        <p class="small muted" id="create-msg"></p>
+      </form>
+      <h3>Ou use um canal que você já criou</h3>
+      <label for="mine">Canais salvos neste navegador</label>
+      <select id="mine"></select>
+      <p class="small muted">A stream key só é mostrada uma vez pelo servidor; este navegador guarda uma cópia (localStorage) por conveniência.</p>
+    </section>
+
+    <section class="card" id="settings" hidden>
+      <h2 style="margin-top:0">2. Configurar o encoder</h2>
+      <p>Canal: <a id="watch-link"></a></p>
+      <label>Stream key (segredo!)</label>
+      <div style="display:flex;gap:6px"><input id="key" type="password" readonly class="mono"><button class="btn" id="show" type="button">mostrar</button></div>
+
+      <h3>OBS Studio · RTMP (o clássico)</h3>
+      <p class="small muted">Configurações → Transmissão → Serviço: <b>Personalizado</b></p>
+      <label>Servidor</label><input id="obs-server" readonly class="mono">
+      <label>Chave de transmissão</label><input id="obs-key" readonly class="mono">
+      <p class="small muted">Saída → Codificador x264 ou NVENC · Taxa de bits 3000–6000 Kbps (CBR) · <b>Intervalo de quadro-chave: 2s</b> · Perfil main.</p>
+
+      <h3>OBS 30+ · WHIP (WebRTC)</h3>
+      <p class="small muted">Serviço: <b>WHIP</b></p>
+      <label>Servidor</label><input id="whip-url" readonly class="mono">
+      <label>Bearer token</label><input id="whip-token" readonly class="mono">
+
+      <h3>ffmpeg · RTMP</h3>
+      <pre id="ffmpeg-rtmp"></pre>
+      <h3>ffmpeg · SRT (resiste a perda de pacotes)</h3>
+      <pre id="ffmpeg-srt"></pre>
+      <p class="small muted">Dica: simule rede ruim com <code>tc qdisc add dev lo root netem loss 5%</code> e compare RTMP × SRT.</p>
+    </section>
+  </div>
+
+  <section class="card" id="browser" hidden style="margin-top:16px">
+    <h2 style="margin-top:0">3. Transmitir do navegador (WebRTC · WHIP)</h2>
+    <p class="muted small">O navegador captura a câmera ou a tela, codifica (H.264 se disponível) e envia via WHIP: um único <code>POST</code> com a oferta SDP.
+      O MediaMTX valida a stream key com o hub e passa a distribuir para HLS, LL-HLS e WebRTC.</p>
+    <div class="toolbar">
+      <button class="btn primary" id="go-cam">📷 Câmera</button>
+      <button class="btn primary" id="go-screen">🖥️ Tela</button>
+      <button class="btn" id="go-stop" disabled>⏹ Parar</button>
+      <span class="small muted" id="pub-state">parado</span>
+    </div>
+    <div class="grid" style="grid-template-columns: minmax(0,2fr) minmax(0,1fr)">
+      <video id="preview" muted playsinline autoplay style="width:100%;background:#000;border-radius:8px;aspect-ratio:16/9"></video>
+      <div class="card mono small" id="pub-stats">—</div>
+    </div>
+  </section>
+</main>
+<script type="module" src="/static/studio.js"></script>
+</body>
+</html>

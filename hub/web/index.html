@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StreamLab</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main>
+  <h1>Canais ao vivo</h1>
+  <p class="muted">Cada card é um <code>path</code> <code>live/&lt;canal&gt;</code> publicado no MediaMTX. A miniatura é gerada pelo transcoder a cada 5s.</p>
+  <div id="list" class="grid"></div>
+  <div id="empty" class="card empty" hidden>
+    <h2>Ninguém ao vivo agora</h2>
+    <p class="muted">Suba o streamer de teste com <code>docker compose --profile demo up -d</code><br>
+      ou crie um canal no <a href="/studio">Estúdio</a> e transmita pelo OBS ou pelo navegador.</p>
+  </div>
+</main>
+<script type="module">
+  import { $, esc, header, since, fmtKbps, config } from '/static/common.js';
+  const cfg = await config();
+  header('/');
+  async function load() {
+    const live = await fetch('/api/live').then((r) => r.json()).catch(() => []);
+    $('#empty').hidden = live.length > 0;
+    $('#list').innerHTML = live.map((c) => `
+      <a class="stream-card" href="/watch/${esc(c.name)}">
+        <div class="thumb" style="background-image:url('${cfg.edge_hls}/${esc(c.name)}/thumb.jpg?t=${Math.floor(Date.now() / 5000)}')">
+          <span class="badge live">AO VIVO</span>
+          <span class="viewers">👁 ${c.viewers} · ${since(c.started_at)}</span>
+        </div>
+        <div class="meta">
+          <b>${esc(c.title)}</b>
+          <span class="muted small">${esc(c.name)}</span>
+          <div><span class="badge proto">${esc(c.ingest)}</span> <span class="badge proto">${c.width}x${c.height}</span>
+          <span class="badge proto">${esc((c.tracks || []).join(' + '))}</span> <span class="badge proto">${fmtKbps(c.ingest_kbps)}</span></div>
+        </div>
+      </a>`).join('');
+  }
+  load();
+  setInterval(load, 5000);
+</script>
+</body>
+</html>

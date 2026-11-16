@@ -1,9 +1,124 @@
+# StreamLab — uma "Twitch didática" para aprender streaming ao vivo.
+#
+#   docker compose up -d --build                  # plataforma
+#   docker compose --profile demo up -d --build   # + um streamer de teste
+#
+# UI: http://localhost:8000   Grafana: http://localhost:3000   Prometheus: http://localhost:9090
+# Porta ocupada? EDGE_PORT=18081 GRAFANA_PORT=13000 docker compose up -d
+
+name: streamlab
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
 services:
-  nginx:
-    image: tiangolo/nginx-rtmp:latest
+  # ------------------------------------------------------------ INGEST / MÍDIA
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.4-ffmpeg
+    restart: unless-stopped
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./stream:/hls/live
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    environment:
+      # IP que o navegador usa para chegar no WebRTC (troque pelo IP da sua
+      # máquina para assistir de outro dispositivo da rede)
+      MTX_WEBRTCADDITIONALHOSTS: ${WEBRTC_HOST:-127.0.0.1}
     ports:
-      - "1935:1935"
-      - "8081:8081"
+      - "1935:1935"          # RTMP  (OBS, ffmpeg)
+      - "8890:8890/udp"      # SRT
+      - "8888:8888"          # LL-HLS
+      - "8889:8889"          # WebRTC: WHIP/WHEP (sinalização HTTP)
+      - "8189:8189/udp"      # WebRTC: mídia (ICE/UDP)
+      - "8189:8189"          # WebRTC: mídia (ICE/TCP fallback)
+    logging: *logging
+
+  # ---------------------------------------- HUB: API, UI, chat, transcoder, QoE
+  hub:
+    build: ./hub
+    restart: unless-stopped
+    environment:
+      MEDIAMTX_API: http://mediamtx:9997
+      MEDIAMTX_RTSP: rtsp://mediamtx:8554
+      HLS_DIR: /hls
+      DATA_DIR: /data
+      DEMO_CHANNEL: demo
+      DEMO_KEY: ${DEMO_KEY:-demo-key-troque-me}
+      # nome:altura:videoKbps:audioKbps (a qualidade "source" é sempre incluída)
+      # portas públicas (usadas para montar as URLs que o navegador acessa)
+      EDGE_PORT: ${EDGE_PORT:-8081}
+      GRAFANA_PORT: ${GRAFANA_PORT:-3000}
+      PROMETHEUS_PORT: ${PROMETHEUS_PORT:-9090}
+      TRANSCODE_LADDER: ${TRANSCODE_LADDER:-480p:480:1400:128,360p:360:700:96,160p:160:250:64}
+    volumes:
+      - hls:/hls
+      - hubdata:/data
+    ports:
+      - "8000:8000"
+    depends_on: [mediamtx]
+    logging: *logging
+
+  # --------------------------------------------------- EDGE (mini CDN com cache)
+  edge:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    volumes:
+      - ./edge/nginx.conf:/etc/nginx/nginx.conf:ro
+      - hls:/srv/hls:ro
+    ports:
+      - "${EDGE_PORT:-8081}:8081"
+    logging: *logging
+
+  # ------------------------------------------------------------- OBSERVABILIDADE
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.4.2
+    command: ["--nginx.scrape-uri=http://edge:8085/stub_status"]
+    restart: unless-stopped
+    depends_on: [edge]
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  grafana:
+    image: grafana/grafana:12.3.0
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/streamlab.json
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on: [prometheus]
+
+  # ------------------------------------------------- DEMO: um "streamer" falso
+  # Gera barras de teste + relógio + tom de áudio e publica via RTMP com a
+  # stream key do canal "demo". Simula o OBS.
+  demo-streamer:
+    profiles: [demo]
+    build: ./demo
+    environment:
+      TARGET: rtmp://mediamtx:1935/live
+      CHANNEL: demo
+      STREAM_KEY: ${DEMO_KEY:-demo-key-troque-me}
+    restart: unless-stopped
+    depends_on: [mediamtx, hub]
+
+volumes:
+  hls:
+  hubdata:
+  prometheus:

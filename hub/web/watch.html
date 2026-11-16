@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Assistir · StreamLab</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js"></script>
+</head>
+<body>
+<main>
+  <div class="watch">
+    <section>
+      <div class="player-wrap">
+        <video id="video" playsinline muted autoplay controls></video>
+        <div class="offline" id="offline" hidden><div><h2>Canal offline</h2><p>A página volta sozinha quando a live começar.</p></div></div>
+        <div class="nerd mono" id="nerd"><table id="nerd-t"></table></div>
+      </div>
+
+      <div class="toolbar">
+        <b class="small muted">Protocolo:</b>
+        <button class="btn" data-mode="hls" title="HLS com várias qualidades (ABR), entregue pelo edge/CDN">HLS ABR (via CDN)</button>
+        <button class="btn" data-mode="llhls" title="Low-Latency HLS direto do MediaMTX, só a qualidade original">LL-HLS</button>
+        <button class="btn" data-mode="webrtc" title="WebRTC via WHEP, latência abaixo de 1 segundo">WebRTC (WHEP)</button>
+        <span class="sep"></span>
+        <label for="quality" class="small" style="margin:0">Qualidade</label>
+        <select id="quality" style="width:auto"></select>
+        <button class="btn" id="btn-nerd">Stats para nerds</button>
+        <button class="btn" id="btn-unmute">🔊 Ativar som</button>
+        <span class="sep"></span>
+        <span class="small muted">Relógio UTC: <b class="mono" id="clock"></b></span>
+      </div>
+
+      <div class="chan-head">
+        <div class="avatar" id="avatar">?</div>
+        <div>
+          <h1 id="title">…</h1>
+          <div class="muted small"><b id="chname"></b> · <span id="live-badge"></span> <span id="viewers"></span> · <span id="uptime"></span></div>
+        </div>
+      </div>
+
+      <div class="tabs" id="tabs">
+        <button data-tab="pipeline" class="active">Como o vídeo chega até você</button>
+        <button data-tab="segments">Requisições (segmentos)</button>
+        <button data-tab="playlist">Playlist / SDP ao vivo</button>
+        <button data-tab="cli">Assistir pelo terminal</button>
+      </div>
+
+      <div class="tab active" id="tab-pipeline">
+        <div class="pipeline" id="pipeline"></div>
+        <p class="muted small" id="pipeline-note"></p>
+      </div>
+
+      <div class="tab" id="tab-segments">
+        <p class="muted small">Cada linha é um arquivo baixado pelo player. No HLS o vídeo é só uma sequência de arquivos HTTP comuns:
+          por isso dá para usar qualquer CDN. <span class="hit">HIT</span> = veio do cache do edge;
+          <span class="miss">MISS</span> = o edge precisou buscar no origin. Throughput = tamanho ÷ tempo de download
+          (é isso que o algoritmo ABR usa para escolher a qualidade).</p>
+        <div class="seglog card" style="padding:0">
+          <table class="data mono"><thead><tr><th>hora</th><th>arquivo</th><th>qualidade</th><th>duração</th><th>tamanho</th><th>download</th><th>throughput</th><th>cache</th></tr></thead>
+            <tbody id="seglog"></tbody></table>
+        </div>
+        <p class="small muted" id="cache-ratio"></p>
+      </div>
+
+      <div class="tab" id="tab-playlist">
+        <div class="explain">
+          <div><h3 id="pl-title">Playlist</h3><pre class="playlist" id="playlist">…</pre></div>
+          <div><h3>O que significa cada linha</h3><div id="pl-help" class="small"></div></div>
+        </div>
+      </div>
+
+      <div class="tab" id="tab-cli">
+        <p class="muted small">Tudo que o navegador faz, você pode fazer no terminal:</p>
+        <pre id="cli"></pre>
+      </div>
+    </section>
+
+    <aside class="card chat">
+      <div style="display:flex;justify-content:space-between;align-items:center"><b>Chat ao vivo</b><span class="small muted" id="ws-state">conectando…</span></div>
+      <div class="msgs" id="msgs"></div>
+      <form id="chat-form">
+        <input id="nick" style="width:110px" maxlength="20" title="seu apelido">
+        <input id="chat-input" placeholder="Enviar mensagem" maxlength="300" autocomplete="off">
+        <button class="btn primary">Enviar</button>
+      </form>
+    </aside>
+  </div>
+</main>
+<script type="module" src="/static/watch.js"></script>
+</body>
+</html>

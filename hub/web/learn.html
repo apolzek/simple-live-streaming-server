@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aprenda · StreamLab</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<main class="prose">
+  <h1>Como uma live funciona</h1>
+  <p class="muted">Um guia rápido para acompanhar enquanto você mexe no StreamLab. A versão completa (com o panorama de 2027) está no README do repositório.</p>
+
+  <h2>O caminho do vídeo</h2>
+<pre>
+ câmera/tela ─► ENCODER ─► INGEST ─► TRANSCODER ─► PACKAGER ─► ORIGIN ─► CDN/EDGE ─► PLAYER
+               (OBS)      (RTMP,    (FFmpeg:      (HLS/CMAF   (arquivos) (cache)    (hls.js,
+                          SRT,      várias        segmentos                          ABR)
+                          WHIP)     qualidades)   de 2s)
+                               └──────────── atalho de baixa latência ────────────► WebRTC (WHEP) / LL-HLS
+</pre>
+  <ol>
+    <li><b>Encoder</b>: comprime o vídeo bruto (~1,5 Gbps em 1080p60) para alguns Mbps com um codec (H.264, HEVC, AV1).
+      O <i>keyframe</i> (quadro completo) a cada 2s é o que permite cortar o vídeo em segmentos.</li>
+    <li><b>Ingest</b>: o protocolo que leva o vídeo do streamer até a plataforma. Precisa ser confiável e com pouca latência.</li>
+    <li><b>Transcoder</b>: gera a <i>escada ABR</i> (1080p, 720p, 480p…) para que cada espectador receba o que a rede dele aguenta.</li>
+    <li><b>Packager</b>: corta em segmentos e escreve playlists (HLS) ou manifestos (DASH).</li>
+    <li><b>CDN</b>: como os segmentos são arquivos HTTP comuns, milhares de servidores de cache espalhados pelo mundo os entregam.</li>
+    <li><b>Player</b>: baixa playlists e segmentos, mede a própria banda e escolhe a qualidade (ABR).</li>
+  </ol>
+
+  <h2>Protocolos</h2>
+  <table class="cmp">
+    <tr><th>Protocolo</th><th>Papel</th><th>Transporte</th><th>Latência típica</th><th>No StreamLab</th></tr>
+    <tr><td>RTMP / E-RTMP</td><td>ingest</td><td>TCP</td><td>1–3s</td><td><code>rtmp://localhost:1935/live</code></td></tr>
+    <tr><td>SRT</td><td>ingest / contribuição</td><td>UDP + retransmissão (ARQ) + criptografia</td><td>0,1–2s (configurável)</td><td><code>srt://localhost:8890</code></td></tr>
+    <tr><td>WHIP (WebRTC)</td><td>ingest pelo navegador / OBS 30+</td><td>UDP (SRTP)</td><td>&lt; 0,5s</td><td><a href="/studio">Estúdio</a></td></tr>
+    <tr><td>RTSP</td><td>câmeras IP, uso interno</td><td>TCP/UDP</td><td>&lt; 1s</td><td>transcoder lê daqui</td></tr>
+    <tr><td>HLS</td><td>entrega em massa</td><td>HTTP</td><td>6–30s</td><td>modo "HLS ABR"</td></tr>
+    <tr><td>LL-HLS</td><td>entrega com baixa latência</td><td>HTTP (partes + blocking reload)</td><td>2–4s</td><td>modo "LL-HLS"</td></tr>
+    <tr><td>MPEG-DASH / LL-DASH</td><td>entrega em massa (padrão aberto)</td><td>HTTP</td><td>2–30s</td><td>—</td></tr>
+    <tr><td>WebRTC (WHEP)</td><td>entrega interativa</td><td>UDP (SRTP)</td><td>&lt; 1s</td><td>modo "WebRTC"</td></tr>
+    <tr><td>MoQ (Media over QUIC)</td><td>ingest + entrega (emergente)</td><td>QUIC / WebTransport</td><td>&lt; 1s, escalável via relays</td><td>experimental no MediaMTX</td></tr>
+  </table>
+
+  <h2>Experimentos para fazer agora</h2>
+  <ol>
+    <li><b>Compare latências</b>: abra o canal <a href="/watch/demo">demo</a>, troque entre HLS, LL-HLS e WebRTC e compare o relógio gravado no vídeo com o relógio da página.</li>
+    <li><b>Veja o ABR trabalhar</b>: DevTools → Network → Throttling "Fast 4G" / "Slow 4G" e observe a qualidade cair nos Stats para nerds.</li>
+    <li><b>Veja o CDN</b>: aba "Requisições" do player. Abra o canal em duas abas: os segmentos passam a ser <span class="hit">HIT</span>.</li>
+    <li><b>Quebre o transcoder</b>: suba <code>TRANSCODE_LADDER</code> com 1080p e várias qualidades. Veja <code>speed &lt; 1.0x</code> no Grafana e os players travando (rebuffering).</li>
+    <li><b>Leia o protocolo</b>: aba "Playlist / SDP" mostra o .m3u8 ao vivo (HLS) e o SDP negociado (WebRTC), com explicação de cada linha.</li>
+    <li><b>Observe o espectador</b>: no Grafana, painel "Audiência e QoE": startup time, rebuffering ratio, latência por protocolo.</li>
+  </ol>
+
+  <div class="callout"><b>QoS × QoE.</b> QoS são as métricas do sistema (CPU do transcoder, bytes no edge, perda de pacotes).
+    QoE é o que a pessoa sente (demorou para abrir? travou? ficou borrado? está atrasado em relação ao chat?).
+    Uma plataforma de live precisa das duas — e só o player sabe a segunda.</div>
+</main>
+<script type="module">import { header } from '/static/common.js'; header('/learn');</script>
+</body>
+</html>

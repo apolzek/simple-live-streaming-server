@@ -1,0 +1,64 @@
+# =============================================================================
+# MediaMTX — o "ingest + servidor de mídia" do StreamLab
+# -----------------------------------------------------------------------------
+# Ele recebe o sinal do streamer (RTMP, SRT, WHIP/WebRTC, RTSP) e entrega para
+# quem quiser ler, convertendo protocolos na hora (sem re-encode):
+#   - RTSP  :8554  -> usado internamente pelo transcoder do hub
+#   - LL-HLS :8888 -> Low-Latency HLS (partes de 200ms) direto pro navegador
+#   - WebRTC :8889 -> WHEP (assistir) e WHIP (transmitir) com latência < 1s
+# Referência completa de cada chave: o mediamtx.yml padrão dentro da imagem.
+# =============================================================================
+
+logLevel: info
+logDestinations: [stdout]
+
+# ---- Autenticação ----------------------------------------------------------
+# Toda conexão (publicar, assistir, API, métricas) pergunta ao hub se pode.
+# É aqui que a "stream key" é validada — igual a Twitch faz no ingest.
+authMethod: http
+authHTTPAddress: http://hub:8000/api/mediamtx/auth
+
+# ---- API e métricas (só na rede interna do compose) ------------------------
+api: yes
+apiAddress: :9997
+metrics: yes
+metricsAddress: :9998
+
+# ---- RTSP: usado pelo transcoder (TCP = sem perda de pacotes) --------------
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+# ---- RTMP: o protocolo "de sempre" do OBS ----------------------------------
+rtmp: yes
+rtmpAddress: :1935
+
+# ---- SRT: ingest moderno, resiste a perda de pacotes (UDP + ARQ) -----------
+srt: yes
+srtAddress: :8890
+
+# ---- LL-HLS ----------------------------------------------------------------
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigins: ["*"]
+hlsVariant: lowLatency    # mpegts | fmp4 | lowLatency
+hlsSegmentCount: 7
+hlsSegmentDuration: 1s    # na prática o segmento fecha no próximo keyframe
+hlsPartDuration: 200ms    # "partes" que o player baixa antes do segmento fechar
+
+# ---- WebRTC (WHEP para assistir, WHIP para transmitir) --------------------
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigins: ["*"]
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189   # fallback quando UDP está bloqueado
+# O container não sabe o IP que o navegador enxerga. Informe aqui (ou via
+# MTX_WEBRTCADDITIONALHOSTS no compose) o IP/host da sua máquina.
+webrtcAdditionalHosts: [127.0.0.1]
+
+# ---- MoQ (Media over QUIC) - experimental ----------------------------------
+moq: no
+
+paths:
+  # Só aceitamos o padrão live/<canal>; quem decide se pode é o hub.
+  "~^live/[a-z0-9_]{3,25}$":

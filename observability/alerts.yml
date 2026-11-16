@@ -1,0 +1,41 @@
+# Alertas didáticos: cada um mapeia um problema real de uma plataforma de live.
+groups:
+  - name: streamlab
+    rules:
+      - alert: TranscoderAtrasado
+        expr: streamlab_transcoder_speed_ratio < 0.95
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "Transcoder de {{ $labels.channel }} abaixo do tempo real ({{ $value | printf \"%.2f\" }}x)"
+          description: "A CPU não dá conta da escada ABR. Os segmentos vão atrasar e os players vão travar. Reduza TRANSCODE_LADDER ou use preset mais rápido."
+
+      - alert: TranscoderReiniciando
+        expr: increase(streamlab_transcoder_restarts_total[5m]) > 2
+        labels: { severity: warning }
+        annotations:
+          summary: "FFmpeg de {{ $labels.channel }} reiniciou {{ $value }} vezes em 5 min"
+
+      - alert: RebufferingAlto
+        expr: |
+          sum by (channel) (rate(streamlab_player_rebuffer_seconds_total[5m]))
+            / sum by (channel) (rate(streamlab_player_watch_seconds_total[5m])) > 0.02
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Rebuffering ratio de {{ $labels.channel }} acima de 2%"
+          description: "Espectadores passando mais de 2% do tempo travados. Olhe bitrate do ingest, cache do edge e a escada ABR."
+
+      - alert: LatenciaAltaHLS
+        expr: histogram_quantile(0.5, sum by (le) (rate(streamlab_player_latency_seconds_bucket{mode="hls"}[5m]))) > 15
+        for: 2m
+        labels: { severity: info }
+        annotations:
+          summary: "Latência mediana do HLS acima de 15s"
+
+      - alert: IngestSemDados
+        expr: streamlab_transcoder_up == 1 and on (channel) streamlab_transcoder_fps == 0
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.channel }} está 'ao vivo' mas nenhum quadro está sendo processado"
