@@ -1,5 +1,6 @@
 // Página de um canal: player (HLS / LL-HLS / WebRTC), stats, QoE e chat.
-import { $, $$, config, esc, header, since, fmtKbps, fmtBytes } from '/static/common.js';
+import { $, $$, config, esc, header, since, fmtKbps, fmtBytes, avatarColor } from '/static/common.js';
+import { draw } from '/static/diagram.js';
 
 header('/watch');
 const channel = location.pathname.split('/').pop();
@@ -243,6 +244,7 @@ async function loadInfo() {
   $('#title').textContent = info.title;
   $('#chname').textContent = info.name;
   $('#avatar').textContent = info.name[0].toUpperCase();
+  $('#avatar').style.background = avatarColor(info.name);
   document.title = `${info.name} · StreamLab`;
   $('#live-badge').innerHTML = info.live ? '<span class="badge live">AO VIVO</span>' : '<span class="badge proto">OFFLINE</span>';
   $('#offline').hidden = info.live;
@@ -282,28 +284,57 @@ function renderNerd() {
   $('#nerd-t').innerHTML = rows;
 }
 
-function stage(title, lines, hot) {
-  return `<div class="stage ${hot ? 'hot' : ''}"><b>${title}</b>${lines.map((l) => `<div class="small">${l}</div>`).join('')}</div>`;
-}
-function renderPipeline() {
-  if (!info) return;
-  const arrow = '<div class="arrow">→</div>';
+// O caminho do vídeo, desenhado em Mermaid com os números ao vivo.
+// As três rotas aparecem; a rota do modo atual fica destacada.
+const q = (t) => String(t ?? '').replace(/["<>]/g, ''); // texto seguro dentro de ["..."]
+function pipelineDiagram() {
   const tc = info.transcoder;
-  const viaCDN = mode === 'hls';
-  const stages = [
-    stage('1. Encoder', ['OBS / ffmpeg / navegador', 'comprime o vídeo (H.264…)'], true),
-    stage('2. Ingest', [`<span class="v">${esc(info.ingest || '—')}</span>`, `${fmtKbps(info.ingest_kbps)} · ${info.width || '?'}x${info.height || '?'}`, esc((info.tracks || []).join(' + '))], true),
+  const tot = cache.hit + cache.miss;
+  const lat = currentLatency();
+  const kbps = Math.round((info.ingest_kbps || 0) / 100) * 100;
+  const L = {
+    enc: 'Encoder<br/>OBS · ffmpeg<br/>navegador',
+    ing: `MediaMTX: ingest<br/><b>${q(info.ingest || '?')}</b><br/>${q(fmtKbps(kbps))} · ${info.width || '?'}x${info.height || '?'}<br/>${q((info.tracks || []).join(' + '))}`,
+    tc: `Transcoder FFmpeg<br/><b>${(info.renditions || []).length} qualidades</b><br/>${q((info.renditions || []).join(' · '))}<br/>${tc ? `${Math.round(tc.fps)} fps · ${tc.speed}x tempo real` : 'iniciando'}`,
+    pkg: 'Packager<br/><b>HLS / CMAF</b><br/>fMP4 de 2s',
+    edge: `Edge / CDN<br/><b>${tot ? Math.round((cache.hit / tot) * 100) + '% HIT' : 'sem dados'}</b>`,
+    ll: 'Remux LL-HLS<br/>partes de 200ms',
+    rtc: 'Remux WebRTC<br/>RTP/SRTP · UDP',
+    ply: `Player<br/><b>${lat ? (Math.round(lat * 2) / 2).toFixed(1) + ' s de latência' : 'latência —'}</b><br/>${video.videoWidth}x${video.videoHeight} · buffer ${(Math.round(bufferAhead() * 2) / 2).toFixed(1)}s`,
+  };
+  const route = { hls: ['tc', 'pkg', 'edge'], llhls: ['ll'], webrtc: ['rtc'] }[mode];
+  const on = new Set(['enc', 'ing', 'ply', ...route]);
+  const cls = (n) => (on.has(n) ? 'on' : 'off');
+  // índice das arestas para destacar a rota ativa (linkStyle)
+  const edges = [
+    ['enc', 'ing', 'RTMP · SRT · WHIP'],
+    ['ing', 'tc', 'RTSP'],
+    ['tc', 'pkg', ''],
+    ['pkg', 'edge', 'm3u8 + m4s'],
+    ['edge', 'ply', 'HLS'],
+    ['ing', 'll', ''],
+    ['ll', 'ply', 'LL-HLS'],
+    ['ing', 'rtc', ''],
+    ['rtc', 'ply', 'WHEP'],
   ];
-  if (viaCDN) {
-    stages.push(stage('3. Transcoder', [`<span class="v">${(info.renditions || []).length} qualidades</span>`, esc((info.renditions || []).join(' · ')), tc ? `${tc.fps} fps · ${tc.speed}x tempo real` : 'iniciando…'], true));
-    stages.push(stage('4. Packager', ['<span class="v">HLS / CMAF</span>', 'segmentos fMP4 de 2s', 'master + playlists'], true));
-    const tot = cache.hit + cache.miss;
-    stages.push(stage('5. Edge / CDN', [`<span class="v">${tot ? Math.round((cache.hit / tot) * 100) + '% HIT' : '—'}</span>`, 'NGINX proxy_cache', 'cache dos segmentos'], true));
-  } else {
-    stages.push(stage('3. Remux (MediaMTX)', [`<span class="v">${mode === 'webrtc' ? 'RTP / SRTP' : 'LL-HLS'}</span>`, 'sem transcodificação', mode === 'webrtc' ? 'pacotes UDP em tempo real' : 'partes de 200ms']));
-  }
-  stages.push(stage(`${viaCDN ? 6 : 4}. Player`, [`<span class="v">${currentLatency() ? currentLatency().toFixed(1) + 's' : '—'}</span>`, 'de latência', `${video.videoWidth}x${video.videoHeight} · buffer ${bufferAhead().toFixed(1)}s`], true));
-  $('#pipeline').innerHTML = stages.join(arrow);
+  const lines = [
+    'flowchart LR',
+    ...Object.entries(L).map(([k, v]) => `  ${k}["${v}"]:::${cls(k)}`),
+    ...edges.map(([a, b, t]) => `  ${a} -->${t ? `|"${t}"|` : ''} ${b}`),
+    '  classDef on fill:#2b2d31,stroke:#5865f2,stroke-width:2px,color:#f2f3f5',
+    '  classDef off fill:#232428,stroke:#3f4147,color:#6d6f78',
+  ];
+  edges.forEach(([a, b], i) => {
+    const active = on.has(a) && on.has(b);
+    lines.push(`  linkStyle ${i} stroke:${active ? '#5865f2' : '#3f4147'},stroke-width:${active ? 3 : 1}px`);
+  });
+  return lines.join('\n');
+}
+
+function renderPipeline() {
+  if (!info || !$('#tab-pipeline').classList.contains('active')) return;
+  if (!info.live) { $('#pipeline').textContent = 'Canal offline.'; return; }
+  draw($('#pipeline'), pipelineDiagram());
   $('#pipeline-note').innerHTML = {
     hls: 'HLS ABR: o vídeo é re-codificado em várias qualidades, cortado em arquivos de 2s e servido por HTTP com cache. Escala para milhões, mas a latência fica em ~6–10s (o player precisa de alguns segmentos no buffer).',
     llhls: 'LL-HLS: cada segmento é publicado em "partes" de ~200ms e a playlist é bloqueante (o player pede a próxima parte antes dela existir). Latência ~2–3s, ainda sobre HTTP/CDN.',
@@ -412,27 +443,47 @@ ffprobe -hide_banner ${cfg.rtmp}/${channel}
 docker compose logs -f edge | grep ${channel}`;
 }
 
-setInterval(() => { renderNerd(); renderPipeline(); renderSegments(); }, 1000);
+setInterval(() => { renderNerd(); renderSegments(); }, 1000);
+setInterval(renderPipeline, 2000);
 setInterval(renderPlaylist, 2000);
-$$('#tabs button').forEach((b) => b.addEventListener('click', () => setTimeout(renderPlaylist, 50)));
+$$('#tabs button').forEach((b) => b.addEventListener('click', () => setTimeout(() => { renderPlaylist(); renderPipeline(); }, 50)));
 
 // ============================================================ chat
 const nickIn = $('#nick');
 nickIn.value = store.get('nick', 'viewer' + Math.floor(Math.random() * 9000 + 1000));
 let ws;
+let lastMsg = { nick: '', ts: 0 };
 function connectChat() {
+  lastMsg = { nick: '', ts: 0 };
+  $('#msgs').innerHTML = '';
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/chat/${channel}?nick=${encodeURIComponent(nickIn.value)}`);
   ws.onopen = () => ($('#ws-state').textContent = 'conectado via WebSocket');
   ws.onclose = () => { $('#ws-state').textContent = 'reconectando…'; setTimeout(connectChat, 2000); };
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
-    if (m.type === 'viewers') { $('#viewers').textContent = `👁 ${m.count} assistindo`; return; }
+    if (m.type === 'viewers') { $('#viewers').textContent = `${m.count} assistindo`; return; }
     const box = $('#msgs');
     const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
     const div = document.createElement('div');
-    div.className = 'msg msg-' + m.type; // (não usar a classe .chat: é a do painel)
-    div.innerHTML = m.type === 'chat' ? `<span class="nick" style="color:${esc(m.color)}">${esc(m.nick)}</span>: ${esc(m.text)}` : esc(m.text);
+    // (não usar a classe .chat na mensagem: é a do painel)
+    if (m.type === 'chat') {
+      const d = new Date(m.ts);
+      const hhmm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      // mensagens seguidas da mesma pessoa (em até 5 min) são agrupadas sem repetir avatar/nome
+      const grouped = lastMsg.nick === m.nick && m.ts - lastMsg.ts < 5 * 60 * 1000;
+      div.className = 'msg msg-chat' + (grouped ? '' : ' first');
+      div.innerHTML = grouped
+        ? `<span class="hover-time">${hhmm}</span><div class="text">${esc(m.text)}</div>`
+        : `<div class="ava" style="background:${avatarColor(m.nick)}">${esc(m.nick[0].toUpperCase())}</div>
+           <div class="who"><span class="nick" style="color:${esc(m.color)}">${esc(m.nick)}</span><span class="time">hoje às ${hhmm}</span></div>
+           <div class="text">${esc(m.text)}</div>`;
+      lastMsg = { nick: m.nick, ts: m.ts };
+    } else {
+      div.className = 'msg msg-system';
+      div.textContent = m.text;
+      lastMsg = { nick: '', ts: 0 };
+    }
     box.append(div);
     while (box.children.length > 200) box.firstChild.remove();
     if (stick) box.scrollTop = box.scrollHeight;

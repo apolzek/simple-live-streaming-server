@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Assistir · StreamLab</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
   <link rel="stylesheet" href="/static/app.css">
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js"></script>
 </head>
@@ -26,7 +28,7 @@
         <label for="quality" class="small" style="margin:0">Qualidade</label>
         <select id="quality" style="width:auto"></select>
         <button class="btn" id="btn-nerd">Stats para nerds</button>
-        <button class="btn" id="btn-unmute">🔊 Ativar som</button>
+        <button class="btn" id="btn-unmute">Ativar som</button>
         <span class="sep"></span>
         <span class="small muted">Relógio UTC: <b class="mono" id="clock"></b></span>
       </div>
@@ -47,7 +49,7 @@
       </div>
 
       <div class="tab active" id="tab-pipeline">
-        <div class="pipeline" id="pipeline"></div>
+        <div class="diagram" id="pipeline">carregando diagrama…</div>
         <p class="muted small" id="pipeline-note"></p>
       </div>
 
@@ -76,13 +78,15 @@
       </div>
     </section>
 
-    <aside class="card chat">
-      <div style="display:flex;justify-content:space-between;align-items:center"><b>Chat ao vivo</b><span class="small muted" id="ws-state">conectando…</span></div>
+    <aside class="chat">
+      <div class="chat-head"><b>chat-ao-vivo</b><span class="small muted" id="ws-state">conectando…</span></div>
       <div class="msgs" id="msgs"></div>
+      <div class="nick-row"><span>Seu apelido</span><input id="nick" maxlength="20" title="seu apelido"></div>
       <form id="chat-form">
-        <input id="nick" style="width:110px" maxlength="20" title="seu apelido">
-        <input id="chat-input" placeholder="Enviar mensagem" maxlength="300" autocomplete="off">
-        <button class="btn primary">Enviar</button>
+        <div class="composer">
+          <input id="chat-input" placeholder="Conversar em #chat-ao-vivo" maxlength="300" autocomplete="off">
+          <button class="btn primary">Enviar</button>
+        </div>
       </form>
     </aside>
   </div>

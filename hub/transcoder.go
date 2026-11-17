@@ -61,6 +61,7 @@ type PathInfo struct {
 	ReadyTime time.Time `json:"readyTime"`
 	Source    *struct {
 		Type string `json:"type"`
+		ID   string `json:"id"`
 	} `json:"source"`
 	Tracks  []string `json:"tracks"`
 	Tracks2 []struct {
@@ -550,6 +551,34 @@ func (t *Transcoders) cleanup(ch string) {
 	if !running {
 		os.RemoveAll(filepath.Join(t.cfg.HLSDir, ch))
 	}
+}
+
+// Kick derruba quem está publicando no canal, usando a API do MediaMTX.
+func (t *Transcoders) Kick(ctx context.Context, ch string) error {
+	p, ok := t.Snapshot()[ch]
+	if !ok || p.Source == nil || p.Source.ID == "" {
+		return nil // não está ao vivo
+	}
+	kind := map[string]string{
+		"rtmpConn":      "rtmpconns",
+		"srtConn":       "srtconns",
+		"webRTCSession": "webrtcsessions",
+		"rtspSession":   "rtspsessions",
+		"rtspsSession":  "rtspssessions",
+	}[p.Source.Type]
+	if kind == "" {
+		return fmt.Errorf("não sei derrubar fonte do tipo %s", p.Source.Type)
+	}
+	req, _ := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("%s/v3/%s/kick/%s", t.cfg.MediaMTXAPI, kind, p.Source.ID), nil)
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("mediamtx kick: %s", resp.Status)
+	}
+	return nil
 }
 
 func (t *Transcoders) StopAll() {

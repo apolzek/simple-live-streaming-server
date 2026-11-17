@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Estúdio · StreamLab</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -22,10 +24,31 @@
         <p><button class="btn primary">Criar canal e gerar stream key</button></p>
         <p class="small muted" id="create-msg"></p>
       </form>
-      <h3>Ou use um canal que você já criou</h3>
+      <h3>Ou use um canal salvo neste navegador</h3>
       <label for="mine">Canais salvos neste navegador</label>
       <select id="mine"></select>
-      <p class="small muted">A stream key só é mostrada uma vez pelo servidor; este navegador guarda uma cópia (localStorage) por conveniência.</p>
+      <p class="small muted">Ao criar ou recuperar um canal, este navegador guarda uma cópia da stream key (localStorage).</p>
+    </section>
+
+    <section class="card">
+      <h2 style="margin-top:0">Recuperar canal existente</h2>
+      <p class="small muted">Perdeu a stream key ou criou o canal em outro navegador? Escolha o canal e informe a
+        <b>senha do Estúdio</b> (variável <code>STUDIO_PASSWORD</code> do docker compose; padrão <code>admin</code>).</p>
+      <form id="recover">
+        <label for="rec-name">Canal</label>
+        <select id="rec-name" required></select>
+        <label for="rec-pass">Senha do Estúdio</label>
+        <input id="rec-pass" type="password" required autocomplete="current-password">
+        <p style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" type="submit">Recuperar stream key</button>
+          <button class="btn" type="button" id="rotate">Gerar nova stream key</button>
+          <button class="btn danger" type="button" id="delete">Excluir canal</button>
+        </p>
+        <p class="small muted" id="rec-msg"></p>
+      </form>
+      <p class="small muted">"Gerar nova" invalida a chave antiga: novas conexões com ela serão recusadas
+        (quem já está transmitindo continua até desconectar). Use se a chave vazou.
+        "Excluir" apaga o canal e derruba a transmissão se ele estiver ao vivo.</p>
     </section>
 
     <section class="card" id="settings" hidden>
@@ -58,9 +81,9 @@
     <p class="muted small">O navegador captura a câmera ou a tela, codifica (H.264 se disponível) e envia via WHIP: um único <code>POST</code> com a oferta SDP.
       O MediaMTX valida a stream key com o hub e passa a distribuir para HLS, LL-HLS e WebRTC.</p>
     <div class="toolbar">
-      <button class="btn primary" id="go-cam">📷 Câmera</button>
-      <button class="btn primary" id="go-screen">🖥️ Tela</button>
-      <button class="btn" id="go-stop" disabled>⏹ Parar</button>
+      <button class="btn primary" id="go-cam">Câmera</button>
+      <button class="btn primary" id="go-screen">Tela</button>
+      <button class="btn" id="go-stop" disabled>Parar</button>
       <span class="small muted" id="pub-state">parado</span>
     </div>
     <div class="grid" style="grid-template-columns: minmax(0,2fr) minmax(0,1fr)">

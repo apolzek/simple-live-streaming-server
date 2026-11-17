@@ -30,6 +30,7 @@ type Config struct {
 	DataDir     string // onde ficam os canais/stream keys
 	DemoChannel string
 	DemoKey     string
+	StudioPass  string // senha para recuperar/regenerar stream keys no Estúdio
 	Ladder      []Rendition
 }
 
@@ -54,6 +55,7 @@ func loadConfig() Config {
 		DataDir:     env("DATA_DIR", "/data"),
 		DemoChannel: env("DEMO_CHANNEL", "demo"),
 		DemoKey:     env("DEMO_KEY", "demo-key-troque-me"),
+		StudioPass:  env("STUDIO_PASSWORD", "admin"),
 		Ladder:      ladder,
 	}
 }
@@ -89,8 +91,11 @@ func main() {
 	// --- API pública usada pela UI
 	mux.HandleFunc("GET /api/config", api.config)
 	mux.HandleFunc("GET /api/live", api.live)
+	mux.HandleFunc("GET /api/channels", api.channels)
 	mux.HandleFunc("GET /api/channels/{name}", api.channel)
 	mux.HandleFunc("POST /api/channels", api.createChannel)
+	mux.HandleFunc("POST /api/channels/{name}/key", api.channelKey)
+	mux.HandleFunc("DELETE /api/channels/{name}", api.deleteChannel)
 	mux.HandleFunc("POST /api/qoe", qoe.Handle)
 	mux.HandleFunc("GET /ws/chat/{name}", chat.Handle)
 	mux.Handle("GET /metrics", promhttp.Handler())

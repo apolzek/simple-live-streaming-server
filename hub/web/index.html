@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StreamLab</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -18,7 +20,7 @@
   </div>
 </main>
 <script type="module">
-  import { $, esc, header, since, fmtKbps, config } from '/static/common.js';
+  import { $, esc, header, since, fmtKbps, config, avatarColor } from '/static/common.js';
   const cfg = await config();
   header('/');
   async function load() {
@@ -28,9 +30,10 @@
       <a class="stream-card" href="/watch/${esc(c.name)}">
         <div class="thumb" style="background-image:url('${cfg.edge_hls}/${esc(c.name)}/thumb.jpg?t=${Math.floor(Date.now() / 5000)}')">
           <span class="badge live">AO VIVO</span>
-          <span class="viewers">👁 ${c.viewers} · ${since(c.started_at)}</span>
+          <span class="viewers">${c.viewers} assistindo · ${since(c.started_at)}</span>
         </div>
         <div class="meta">
+          <div class="ava" style="background:${avatarColor(c.name)}">${esc(c.name[0].toUpperCase())}</div>
           <b>${esc(c.title)}</b>
           <span class="muted small">${esc(c.name)}</span>
           <div><span class="badge proto">${esc(c.ingest)}</span> <span class="badge proto">${c.width}x${c.height}</span>

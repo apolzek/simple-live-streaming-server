@@ -74,3 +74,29 @@ func TestAuthDecide(t *testing.T) {
 		}
 	}
 }
+
+func TestStoreKeyRecoverAndRotate(t *testing.T) {
+	s, _ := NewStore(t.TempDir())
+	s.Ensure("canal", "x", "chave1")
+	if k, err := s.Key("canal"); err != nil || k != "chave1" {
+		t.Fatalf("Key: %q %v", k, err)
+	}
+	nk, err := s.RotateKey("canal")
+	if err != nil || nk == "chave1" || !s.CheckKey("canal", nk) || s.CheckKey("canal", "chave1") {
+		t.Fatalf("RotateKey: %q %v", nk, err)
+	}
+	if _, err := s.Key("nao_existe"); err != ErrNotFound {
+		t.Fatalf("esperava ErrNotFound, veio %v", err)
+	}
+}
+
+func TestStoreDelete(t *testing.T) {
+	s, _ := NewStore(t.TempDir())
+	s.Ensure("canal", "x", "k")
+	if err := s.Delete("canal"); err != nil || s.CheckKey("canal", "k") {
+		t.Fatalf("Delete falhou: %v", err)
+	}
+	if err := s.Delete("canal"); err != ErrNotFound {
+		t.Fatalf("esperava ErrNotFound, veio %v", err)
+	}
+}

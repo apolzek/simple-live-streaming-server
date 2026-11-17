@@ -4,20 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Aprenda · StreamLab</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <main class="prose">
   <h1>Como uma live funciona</h1>
-  <p class="muted">Um guia rápido para acompanhar enquanto você mexe no StreamLab. A versão completa (com o panorama de 2027) está no README do repositório.</p>
+  <p class="muted">Um guia rápido para acompanhar enquanto você mexe no StreamLab. Os detalhes técnicos de cada protocolo (handshakes, pacotes, playlists, caixas MP4) estão na pasta <code>docs/</code> do repositório, e o panorama de 2027 no README.</p>
 
   <h2>O caminho do vídeo</h2>
-<pre>
- câmera/tela ─► ENCODER ─► INGEST ─► TRANSCODER ─► PACKAGER ─► ORIGIN ─► CDN/EDGE ─► PLAYER
-               (OBS)      (RTMP,    (FFmpeg:      (HLS/CMAF   (arquivos) (cache)    (hls.js,
-                          SRT,      várias        segmentos                          ABR)
-                          WHIP)     qualidades)   de 2s)
-                               └──────────── atalho de baixa latência ────────────► WebRTC (WHEP) / LL-HLS
+<pre class="mermaid">
+flowchart LR
+  cam["Câmera / tela"] --> enc["Encoder<br/>OBS, ffmpeg, navegador"]
+  enc -->|"RTMP · SRT · WHIP"| ing["Ingest<br/>MediaMTX"]
+  ing -->|"RTSP interno"| tc["Transcoder<br/>FFmpeg: várias qualidades"]
+  tc --> pkg["Packager<br/>HLS/CMAF, segmentos de 2s"]
+  pkg --> org["Origin<br/>arquivos"]
+  org --> cdn["CDN / Edge<br/>cache"]
+  cdn -->|"HTTP"| ply["Player<br/>hls.js + ABR"]
+  ing -.->|"atalho: LL-HLS"| ply
+  ing -.->|"atalho: WebRTC/WHEP"| ply
 </pre>
   <ol>
     <li><b>Encoder</b>: comprime o vídeo bruto (~1,5 Gbps em 1080p60) para alguns Mbps com um codec (H.264, HEVC, AV1).
@@ -28,6 +35,62 @@
     <li><b>CDN</b>: como os segmentos são arquivos HTTP comuns, milhares de servidores de cache espalhados pelo mundo os entregam.</li>
     <li><b>Player</b>: baixa playlists e segmentos, mede a própria banda e escolhe a qualidade (ABR).</li>
   </ol>
+
+  <h2>Codec, container e protocolo</h2>
+  <p>Três camadas diferentes que costumam ser confundidas. O mesmo vídeo H.264 muda de "embalagem" e de "transporte" pelo caminho, sem ser re-codificado:</p>
+<pre class="mermaid">
+flowchart TB
+  subgraph codec["Codec: como comprimir"]
+    h264["H.264 / HEVC / AV1<br/>AAC / Opus"]
+  end
+  subgraph cont["Container: como embalar"]
+    flv["FLV"]
+    ts["MPEG-TS"]
+    fmp4["fMP4 / CMAF"]
+    rtp["pacotes RTP"]
+  end
+  subgraph proto["Protocolo: como transportar"]
+    rtmp["RTMP sobre TCP"]
+    srt["SRT sobre UDP"]
+    hls["HLS sobre HTTP"]
+    webrtc["WebRTC sobre UDP"]
+  end
+  h264 --> flv --> rtmp
+  h264 --> ts --> srt
+  h264 --> fmp4 --> hls
+  h264 --> rtp --> webrtc
+</pre>
+
+  <h2>O que o player HLS faz, em ordem</h2>
+<pre class="mermaid">
+sequenceDiagram
+  participant P as Player (hls.js)
+  participant E as Edge / CDN
+  participant O as Origin
+  P->>E: GET master.m3u8
+  E->>O: MISS: busca no origin
+  O-->>E: lista de qualidades
+  E-->>P: master (BANDWIDTH, RESOLUTION, CODECS)
+  Note over P: escolhe a qualidade pela banda estimada
+  P->>E: GET 480p/index.m3u8
+  E-->>P: janela com os últimos segmentos
+  P->>E: GET init.mp4 + seg_N.m4s
+  E-->>P: HIT: vem do cache
+  loop a cada ~2s
+    P->>E: recarrega a playlist
+    P->>E: baixa o próximo segmento
+    Note over P: mede o throughput e ajusta a qualidade (ABR)
+  end
+</pre>
+
+  <h2>Quanto atrasa cada protocolo</h2>
+<pre class="mermaid">
+xychart-beta
+  title "Latência típica na internet (segundos)"
+  x-axis ["HLS", "LL-HLS", "LL-DASH", "SRT (contribuição)", "WebRTC", "MoQ"]
+  y-axis "segundos" 0 --> 12
+  bar [9, 3, 3, 1, 0.5, 0.5]
+</pre>
 
   <h2>Protocolos</h2>
   <table class="cmp">
@@ -57,6 +120,11 @@
     QoE é o que a pessoa sente (demorou para abrir? travou? ficou borrado? está atrasado em relação ao chat?).
     Uma plataforma de live precisa das duas — e só o player sabe a segunda.</div>
 </main>
-<script type="module">import { header } from '/static/common.js'; header('/learn');</script>
+<script type="module">
+  import { header } from '/static/common.js';
+  import { drawAll } from '/static/diagram.js';
+  header('/learn');
+  drawAll();
+</script>
 </body>
 </html>

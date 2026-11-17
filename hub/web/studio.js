@@ -36,6 +36,78 @@ function select(name, key) {
   refreshMine();
 }
 
+// ================================================================ recuperar
+async function loadAllChannels() {
+  const list = await fetch('/api/channels').then((r) => r.json()).catch(() => []);
+  const sel = $('#rec-name');
+  const cur = sel.value;
+  sel.innerHTML = list.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}${c.live ? ' (ao vivo)' : ''}</option>`).join('');
+  if (cur) sel.value = cur;
+}
+loadAllChannels();
+addEventListener('streamlab:channels', loadAllChannels);
+
+async function recover(rotate) {
+  const name = $('#rec-name').value;
+  if (!name) return;
+  if (rotate && !confirmRotate(name)) return;
+  $('#rec-msg').textContent = rotate ? 'gerando nova chave…' : 'recuperando…';
+  const r = await fetch(`/api/channels/${encodeURIComponent(name)}/key`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: $('#rec-pass').value, rotate }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#rec-msg').textContent = body.error || `erro ${r.status}`; return; }
+  saveKey(body.name, body.key);
+  select(body.name, body.key);
+  $('#rec-msg').textContent = rotate
+    ? `Nova stream key gerada para ${body.name}. Atualize o OBS: a antiga não funciona mais.`
+    : `Stream key de ${body.name} recuperada. A configuração do encoder está ao lado.`;
+}
+// confirmação sem diálogo do navegador: o botão pede um segundo clique
+let rotateArmed = '';
+function confirmRotate(name) {
+  if (rotateArmed === name) { rotateArmed = ''; $('#rotate').textContent = 'Gerar nova stream key'; return true; }
+  rotateArmed = name;
+  $('#rotate').textContent = 'Clique de novo para confirmar';
+  $('#rec-msg').textContent = `Isso invalida a chave atual de ${name}.`;
+  setTimeout(() => { if (rotateArmed === name) { rotateArmed = ''; $('#rotate').textContent = 'Gerar nova stream key'; } }, 5000);
+  return false;
+}
+// excluir (também pede um segundo clique para confirmar)
+let deleteArmed = '';
+$('#delete').onclick = async () => {
+  const name = $('#rec-name').value;
+  if (!name) return;
+  if (deleteArmed !== name) {
+    deleteArmed = name;
+    $('#delete').textContent = `Confirmar exclusão de ${name}`;
+    $('#rec-msg').textContent = `Clique de novo para excluir ${name} para sempre.`;
+    setTimeout(() => { if (deleteArmed === name) { deleteArmed = ''; $('#delete').textContent = 'Excluir canal'; } }, 5000);
+    return;
+  }
+  deleteArmed = '';
+  $('#delete').textContent = 'Excluir canal';
+  const r = await fetch(`/api/channels/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: $('#rec-pass').value }),
+  });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#rec-msg').textContent = body.error || `erro ${r.status}`; return; }
+  const keys = loadKeys();
+  delete keys[name];
+  try { localStorage.setItem(KEYS, JSON.stringify(keys)); } catch {}
+  if (current?.name === name) { current = null; $('#settings').hidden = true; $('#browser').hidden = true; }
+  refreshMine();
+  $('#rec-msg').textContent = `Canal ${name} excluído.`;
+  dispatchEvent(new Event('streamlab:channels'));
+};
+
+$('#recover').onsubmit = (e) => { e.preventDefault(); recover(false); };
+$('#rotate').onclick = () => recover(true);
+
 $('#show').onclick = () => { const k = $('#key'); k.type = k.type === 'password' ? 'text' : 'password'; };
 
 $('#create').onsubmit = async (e) => {
@@ -44,6 +116,7 @@ $('#create').onsubmit = async (e) => {
   const body = await r.json();
   if (!r.ok) { $('#create-msg').textContent = body.error; return; }
   saveKey(body.name, body.key);
+  dispatchEvent(new Event('streamlab:channels'));
   $('#create-msg').textContent = 'Canal criado! Guarde a stream key: ela não será mostrada de novo pelo servidor.';
   select(body.name, body.key);
 };

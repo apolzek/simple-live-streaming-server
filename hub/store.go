@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 )
@@ -103,6 +104,20 @@ func (s *Store) Create(name, title string) (*Channel, error) {
 	return &cp, nil
 }
 
+// List devolve todos os canais, sem as stream keys, ordenados por nome.
+func (s *Store) List() []Channel {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Channel, 0, len(s.channels))
+	for _, c := range s.channels {
+		cp := *c
+		cp.Key = ""
+		out = append(out, cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 // Get devolve uma cópia sem a stream key (seguro para expor).
 func (s *Store) Get(name string) (Channel, bool) {
 	s.mu.RLock()
@@ -114,6 +129,46 @@ func (s *Store) Get(name string) (Channel, bool) {
 	cp := *c
 	cp.Key = ""
 	return cp, true
+}
+
+var ErrNotFound = errors.New("canal não existe")
+
+// Key devolve a stream key atual do canal (uso: recuperação no Estúdio).
+func (s *Store) Key(name string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	c, ok := s.channels[name]
+	if !ok {
+		return "", ErrNotFound
+	}
+	return c.Key, nil
+}
+
+// RotateKey gera uma nova stream key; a antiga deixa de funcionar para novas
+// conexões (quem já está transmitindo continua até desconectar).
+func (s *Store) RotateKey(name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.channels[name]
+	if !ok {
+		return "", ErrNotFound
+	}
+	c.Key = newKey()
+	if err := s.saveLocked(); err != nil {
+		return "", err
+	}
+	return c.Key, nil
+}
+
+// Delete remove o canal e sua stream key.
+func (s *Store) Delete(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.channels[name]; !ok {
+		return ErrNotFound
+	}
+	delete(s.channels, name)
+	return s.saveLocked()
 }
 
 func (s *Store) CheckKey(name, key string) bool {

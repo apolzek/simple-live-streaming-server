@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -159,6 +160,18 @@ func (a *API) live(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
+// channels lista todos os canais (ao vivo ou não), ao vivo primeiro.
+func (a *API) channels(w http.ResponseWriter, r *http.Request) {
+	snap := a.tc.Snapshot()
+	out := []liveChannel{}
+	for _, ch := range a.store.List() {
+		p, live := snap[ch.Name]
+		out = append(out, a.describe(ch, p, live))
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Live && !out[j].Live })
+	writeJSON(w, 200, out)
+}
+
 func (a *API) channel(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	ch, ok := a.store.Get(name)
@@ -191,6 +204,90 @@ func (a *API) createChannel(w http.ResponseWriter, r *http.Request) {
 		slog.Info("canal criado", "channel", ch.Name)
 		writeJSON(w, 201, ch) // única vez que a stream key é devolvida
 	}
+}
+
+// studioAuth confere a senha do Estúdio; em caso de erro já responde 401.
+func (a *API) studioAuth(w http.ResponseWriter, r *http.Request, channel, password string) bool {
+	if subtle.ConstantTimeCompare([]byte(password), []byte(a.cfg.StudioPass)) == 1 {
+		return true
+	}
+	keyRequests.WithLabelValues("denied").Inc()
+	time.Sleep(500 * time.Millisecond) // freia tentativas de adivinhar a senha
+	slog.Warn("senha do estúdio incorreta", "channel", channel, "ip", r.RemoteAddr)
+	writeJSON(w, 401, map[string]string{"error": "senha do Estúdio incorreta"})
+	return false
+}
+
+// deleteChannel apaga o canal. Se estiver ao vivo, derruba a transmissão antes.
+func (a *API) deleteChannel(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "json inválido"})
+		return
+	}
+	if !a.studioAuth(w, r, name, req.Password) {
+		return
+	}
+	if name == a.cfg.DemoChannel {
+		writeJSON(w, 400, map[string]string{"error": "o canal de demonstração é recriado a cada início; desligue-o com DEMO_CHANNEL vazio"})
+		return
+	}
+	if _, ok := a.store.Get(name); !ok {
+		writeJSON(w, 404, map[string]string{"error": ErrNotFound.Error()})
+		return
+	}
+	// apaga primeiro: assim uma reconexão do encoder já é recusada no auth
+	if err := a.store.Delete(name); err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := a.tc.Kick(r.Context(), name); err != nil {
+		slog.Warn("não consegui derrubar a transmissão", "channel", name, "err", err)
+	}
+	keyRequests.WithLabelValues("deleted").Inc()
+	slog.Info("canal excluído", "channel", name)
+	writeJSON(w, 200, map[string]string{"deleted": name})
+}
+
+// channelKey recupera (ou regenera, com rotate=true) a stream key de um canal.
+// Como o lab não tem login, a prova de "dono" é a senha do Estúdio
+// (STUDIO_PASSWORD). Numa plataforma real isso seria a sessão do usuário.
+func (a *API) channelKey(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	var req struct {
+		Password string `json:"password"`
+		Rotate   bool   `json:"rotate"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "json inválido"})
+		return
+	}
+	if !a.studioAuth(w, r, name, req.Password) {
+		return
+	}
+	var key string
+	var err error
+	action := "recovered"
+	if req.Rotate {
+		action = "rotated"
+		key, err = a.store.RotateKey(name)
+	} else {
+		key, err = a.store.Key(name)
+	}
+	switch {
+	case errors.Is(err, ErrNotFound):
+		writeJSON(w, 404, map[string]string{"error": err.Error()})
+		return
+	case err != nil:
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	keyRequests.WithLabelValues(action).Inc()
+	slog.Info("stream key "+action, "channel", name)
+	writeJSON(w, 200, map[string]string{"name": name, "key": key})
 }
 
 // config devolve as URLs públicas montadas a partir do host que o navegador usou,

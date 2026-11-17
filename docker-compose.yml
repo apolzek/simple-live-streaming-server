@@ -43,6 +43,8 @@ services:
       DATA_DIR: /data
       DEMO_CHANNEL: demo
       DEMO_KEY: ${DEMO_KEY:-demo-key-troque-me}
+      # senha para recuperar/regenerar stream keys pelo Estúdio (troque!)
+      STUDIO_PASSWORD: ${STUDIO_PASSWORD:-admin}
       # nome:altura:videoKbps:audioKbps (a qualidade "source" é sempre incluída)
       # portas públicas (usadas para montar as URLs que o navegador acessa)
       EDGE_PORT: ${EDGE_PORT:-8081}

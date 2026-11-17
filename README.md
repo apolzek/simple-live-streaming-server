@@ -11,29 +11,39 @@ CDN com cache, três formas de assistir (HLS, LL-HLS e WebRTC), chat em tempo re
 > para comparação: é ótima para entender o básico, e o resto deste README mostra o que
 > falta para chegar a algo parecido com uma plataforma de verdade.
 
+```mermaid
+flowchart LR
+  enc["OBS / ffmpeg / navegador"] -->|"RTMP · SRT · WHIP"| mtx
+
+  subgraph mtx_box["MediaMTX: ingest + servidor de mídia"]
+    mtx["MediaMTX"]
+  end
+
+  subgraph hub_box["hub (Go)"]
+    auth["valida stream key"]
+    ff["FFmpeg: escada ABR<br/>HLS / CMAF"]
+    ui["UI web + chat WebSocket"]
+    qoe["coleta QoE dos players"]
+  end
+
+  mtx -->|"POST /api/mediamtx/auth"| auth
+  mtx -->|"RTSP interno"| ff
+  ff -->|".m3u8 + .m4s"| edge["edge NGINX<br/>origin + cache :8081"]
+
+  edge -->|"HLS ABR"| player["Navegador<br/>hls.js / WebRTC"]
+  mtx -->|"LL-HLS :8888"| player
+  mtx -->|"WebRTC / WHEP :8889"| player
+  ui <-->|"páginas + chat"| player
+  player -->|"beacons QoE"| qoe
+
+  prom["Prometheus :9090"] -.->|scrape| mtx
+  prom -.->|scrape| hub_box
+  prom -.->|scrape| edge
+  graf["Grafana :3000"] -.-> prom
 ```
- OBS / ffmpeg / navegador
-        │  RTMP · SRT · WHIP
-        ▼
- ┌─────────────┐  auth (stream key)   ┌──────────────────────────────────────────┐
- │  MediaMTX   │ ───────────────────► │ hub (Go)                                 │
- │  ingest +   │                      │  • valida stream key                     │
- │  servidor   │ ◄── RTSP (interno) ─ │  • FFmpeg: escada ABR → HLS/CMAF         │
- │  de mídia   │                      │  • UI web, chat (WebSocket)              │
- └─────┬───────┘                      │  • recebe QoE dos players → /metrics     │
-       │ LL-HLS :8888                 └──────────────┬───────────────────────────┘
-       │ WebRTC/WHEP :8889                           │ arquivos .m3u8/.m4s
-       │                                             ▼
-       │                              ┌──────────────────────────────┐
-       │                              │ edge (NGINX): origin + cache │ :8081
-       │                              └──────────────┬───────────────┘
-       ▼                                             ▼
-   ┌──────────────────────── navegador (hls.js / WebRTC) ──────────────────────┐
-   │  player · stats para nerds · inspetor de playlist/SDP · chat · beacons QoE │
-   └────────────────────────────────────────────────────────────────────────────┘
-                 Prometheus :9090  ◄── scrape ── MediaMTX, hub, nginx-exporter
-                 Grafana    :3000  ◄── dashboard "pipeline de live streaming"
-```
+
+A documentação técnica completa (arquitetura, cada protocolo por dentro, fundamentos de vídeo e observabilidade)
+está em **[`docs/`](docs/README.md)**.
 
 ---
 
@@ -49,6 +59,7 @@ CDN com cache, três formas de assistir (HLS, LL-HLS e WebRTC), chat em tempo re
 8. [Protocolos em detalhe](#8-protocolos-em-detalhe)
 9. [Streaming em 2027: o panorama](#9-streaming-em-2027-o-panorama)
 10. [Ferramentas do ecossistema](#10-ferramentas-do-ecossistema)
+    · documentação técnica detalhada: [`docs/`](docs/README.md)
 11. [Do laboratório para a produção](#11-do-laboratório-para-a-produção)
 12. [Estrutura do repositório e configuração](#12-estrutura-do-repositório-e-configuração)
 13. [Problemas comuns](#13-problemas-comuns)
@@ -112,6 +123,10 @@ Sem o canal de demo: `docker compose up -d --build`. Para desligar tudo: `docker
 Crie um canal em http://localhost:8000/studio. Você recebe uma **stream key** (ex.: `live_3f9a…`).
 Ela é o segredo que prova que você é dono do canal — nunca aparece nas URLs públicas.
 
+Perdeu a chave ou criou o canal em outro navegador? No Estúdio, em **Recuperar canal existente**, escolha o canal
+e informe a senha do Estúdio (`STUDIO_PASSWORD`, padrão `admin`) para **recuperar**, **gerar uma nova chave**
+(a antiga deixa de valer) ou **excluir** o canal. Em uma plataforma real essa senha seria o login do dono do canal.
+
 ### OBS via RTMP (o clássico)
 *Configurações → Transmissão → Serviço: Personalizado*
 
@@ -159,7 +174,7 @@ sequenceDiagram
     FF->>MTX: RTSP read live/demo
     FF->>FF: decode → scale → encode 480p/360p/160p (+ source copiada)
     FF-->>EDGE: escreve master.m3u8, */index.m3u8, *.m4s (volume compartilhado)
-    Note over EDGE: o player pede arquivos ao edge;<br/>o edge busca no origin só no MISS
+    Note over EDGE: o player pede arquivos ao edge,<br/>que busca no origin só no MISS
 ```
 
 O comando FFmpeg completo é montado em [`hub/transcoder.go`](hub/transcoder.go) (`BuildFFmpegArgs`), comentado bloco a bloco.
@@ -356,6 +371,22 @@ olham o **buffer** (BOLA) ou combinam os dois. Em 2027 a tendência é **per-tit
 | buffer do player (3 segmentos) | 6 s |
 | **total** | **~9–10 s** |
 
+```mermaid
+gantt
+  title Onde vão os ~10 s de um HLS com segmentos de 2 s
+  dateFormat X
+  axisFormat %s s
+  section Streamer
+  captura + encode        :0, 1
+  ingest pela rede        :1, 2
+  section Plataforma
+  transcode               :2, 3
+  esperar o segmento fechar :3, 5
+  CDN + download          :5, 6
+  section Espectador
+  buffer do player (3 segmentos) :6, 12
+```
+
 As técnicas de baixa latência atacam as duas maiores linhas: **segmentos menores/partes** (LL-HLS, LL-DASH, CMAF chunked)
 e **buffer menor** (que só funciona se a rede for estável — trade-off direto com rebuffering).
 
@@ -490,30 +521,30 @@ O StreamLab corta caminho de propósito. O que uma plataforma real precisa a mai
 
 ## 12. Estrutura do repositório e configuração
 
-```
-.
-├── docker-compose.yml          # a plataforma inteira
-├── mediamtx/mediamtx.yml       # ingest + servidor de mídia (comentado)
-├── hub/                        # plano de controle em Go
-│   ├── main.go                 #   rotas e configuração
-│   ├── api.go                  #   auth da stream key, /api/live, /api/channels, /api/config
-│   ├── transcoder.go           #   reconciliation loop + comando FFmpeg da escada ABR
-│   ├── chat.go                 #   chat WebSocket com rate limit
-│   ├── qoe.go                  #   beacons dos players → métricas
-│   ├── metrics.go              #   todas as métricas streamlab_*
-│   ├── store.go                #   canais e stream keys (JSON)
-│   └── web/                    #   UI (HTML/CSS/JS puro + hls.js)
-├── edge/nginx.conf             # origin + edge com cache (mini CDN)
-├── observability/              # Prometheus, alertas, Grafana (datasource + dashboard)
-├── demo/                       # streamer de teste (ffmpeg)
-└── classic/                    # a versão original com nginx-rtmp
-```
+| Caminho | O que é |
+|---|---|
+| `docker-compose.yml` | a plataforma inteira |
+| `mediamtx/mediamtx.yml` | ingest + servidor de mídia (comentado) |
+| `hub/main.go` | rotas e configuração do hub |
+| `hub/api.go` | auth da stream key, `/api/live`, `/api/channels`, `/api/config` |
+| `hub/transcoder.go` | reconciliation loop + comando FFmpeg da escada ABR |
+| `hub/chat.go` | chat WebSocket com rate limit |
+| `hub/qoe.go` | beacons dos players → métricas |
+| `hub/metrics.go` | todas as métricas `streamlab_*` |
+| `hub/store.go` | canais e stream keys (JSON) |
+| `hub/web/` | UI (HTML/CSS/JS puro + hls.js + Mermaid) |
+| `edge/nginx.conf` | origin + edge com cache (mini CDN) |
+| `observability/` | Prometheus, alertas, Grafana (datasource + dashboard) |
+| `demo/` | streamer de teste (ffmpeg) |
+| `docs/` | documentação técnica detalhada |
+| `classic/` | a versão original com nginx-rtmp |
 
 Variáveis de ambiente (use um `.env` ao lado do compose):
 
 | Variável | Padrão | Para quê |
 |---|---|---|
 | `DEMO_KEY` | `demo-key-troque-me` | stream key do canal `demo` |
+| `STUDIO_PASSWORD` | `admin` | senha do Estúdio para recuperar/regenerar stream key e excluir canal |
 | `TRANSCODE_LADDER` | `480p:480:1400:128,360p:360:700:96,160p:160:250:64` | escada ABR (`nome:altura:kbpsVídeo:kbpsÁudio`); a `source` sempre existe |
 | `WEBRTC_HOST` | `127.0.0.1` | IP anunciado no WebRTC (use o IP da máquina para assistir de outro dispositivo) |
 | `EDGE_PORT` / `GRAFANA_PORT` / `PROMETHEUS_PORT` | `8081` / `3000` / `9090` | portas no host |
@@ -523,8 +554,11 @@ API do hub:
 | Rota | Descrição |
 |---|---|
 | `GET /api/live` | canais ao vivo com ingest, codec, resolução, bitrate, espectadores, progresso do transcoder |
+| `GET /api/channels` | todos os canais (ao vivo primeiro), usado pela barra lateral |
 | `GET /api/channels/{nome}` | um canal (sem a stream key) |
-| `POST /api/channels` `{"name","title"}` | cria canal e devolve a stream key (única vez) |
+| `POST /api/channels` `{"name","title"}` | cria canal e devolve a stream key |
+| `POST /api/channels/{nome}/key` `{"password","rotate"}` | recupera a stream key (ou gera uma nova com `rotate: true`); exige a senha do Estúdio |
+| `DELETE /api/channels/{nome}` `{"password"}` | exclui o canal e derruba a transmissão se estiver ao vivo |
 | `POST /api/mediamtx/auth` | chamado pelo MediaMTX a cada publish/read |
 | `POST /api/qoe` | beacons dos players (array JSON) |
 | `GET /ws/chat/{nome}?nick=` | chat (WebSocket) |

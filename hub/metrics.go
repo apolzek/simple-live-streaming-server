@@ -27,6 +27,10 @@ var (
 		Name: "streamlab_auth_requests_total", Help: "Decisões de autenticação pedidas pelo MediaMTX.",
 	}, []string{"action", "protocol", "result"})
 
+	keyRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "streamlab_stream_key_requests_total", Help: "Ações protegidas pela senha do Estúdio (recuperar/regenerar chave, excluir canal, senha errada).",
+	}, []string{"result"})
+
 	// ---- Transcoder
 	transcoderUp = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "streamlab_transcoder_up", Help: "1 se o processo FFmpeg do canal está rodando.",
@@ -116,6 +120,8 @@ func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter 
 // routeLabel mantém a cardinalidade baixa: /watch/foo vira /watch/{name}.
 func routeLabel(p string) string {
 	switch {
+	case strings.HasPrefix(p, "/api/channels/") && strings.HasSuffix(p, "/key"):
+		return "/api/channels/{name}/key"
 	case strings.HasPrefix(p, "/api/channels/"):
 		return "/api/channels/{name}"
 	case strings.HasPrefix(p, "/watch/"):
